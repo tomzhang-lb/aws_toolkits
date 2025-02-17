@@ -50,10 +50,10 @@ class aws_toolkits():
     def __init__(self, broker, branch):
         self.broker = broker
         self.branch = branch
-        self.aws_sf_client = Boto3ClientSingleton('stepfunctions')
-        self.aws_ev_client = Boto3ClientSingleton('events')
+        self.__aws_sf_client = Boto3ClientSingleton('stepfunctions')
+        self.__aws_ev_client = Boto3ClientSingleton('events')
 
-    def round_to_half_hour(self, dt: datetime):
+    def __round_to_half_hour(self, dt: datetime):
         """Rounds a datetime object to the nearest half-hour"""
         minute = dt.minute
         if minute < 30:
@@ -62,13 +62,13 @@ class aws_toolkits():
             rounded_minute = 30
         return dt.replace(minute=rounded_minute, second=0, microsecond=0)
 
-    aws_sf_client = Boto3ClientSingleton('stepfunctions')
-    aws_ev_client = Boto3ClientSingleton('events')
+    # __aws_sf_client = Boto3ClientSingleton('stepfunctions')
+    # __aws_ev_client = Boto3ClientSingleton('events')
 
     def get_broker_state_machine_arn(self):
         output_dict = {}
         state_machines = []
-        response = self.aws_sf_client.list_state_machines(maxResults=1000)
+        response = self.__aws_sf_client.list_state_machines(maxResults=1000)
         state_machines.extend(response['stateMachines'])
 
         if 'nextToken' in response:
@@ -77,7 +77,7 @@ class aws_toolkits():
             next_token = None
 
         while next_token is not None:
-            response = self.aws_sf_client.list_state_machines(maxResults=1000, nextToken=next_token)
+            response = self.__aws_sf_client.list_state_machines(maxResults=1000, nextToken=next_token)
             state_machines.extend(response['stateMachines'])
             if 'nextToken' in response:
                 next_token = response['nextToken']
@@ -96,7 +96,7 @@ class aws_toolkits():
     def get_state_machine_last_run(self, state_machine_arn):
         # response = client.list_executions(stateMachineArn=state_machine_arn, maxResults=1) # not working
         # get last 10 runs
-        response = self.aws_sf_client.list_executions(stateMachineArn=state_machine_arn, maxResults=10)
+        response = self.__aws_sf_client.list_executions(stateMachineArn=state_machine_arn, maxResults=10)
         state_machine_name = state_machine_arn.split(':')[-1]
 
         if response['executions']:
@@ -113,7 +113,7 @@ class aws_toolkits():
 
         return state_machine_execution_result
 
-    def get_broker_all_state_machines_last_run(self):
+    def __get_broker_all_state_machines_last_run(self):
         state_machines_status = []
 
         state_machine_arns = self.get_broker_state_machine_arn()
@@ -128,8 +128,8 @@ class aws_toolkits():
 
     def get_broker_all_state_machines_last_run_formatted(self, check_time=datetime.now()):
         output_table = PrettyTable(['State_Machine', 'Check_Time', 'Start_Time', 'Status', 'Ready_To_Release'])
-        check_time = self.round_to_half_hour(check_time)
-        state_machines_status = self.get_broker_all_state_machines_last_run()
+        check_time = self.__round_to_half_hour(check_time)
+        state_machines_status = self.__get_broker_all_state_machines_last_run()
 
         if state_machines_status:
             for result in state_machines_status:
@@ -160,7 +160,7 @@ class aws_toolkits():
 
     def list_rule_target_ids(self, rule):
         target_ids = []
-        response = self.aws_ev_client.list_targets_by_rule(
+        response = self.__aws_ev_client.list_targets_by_rule(
             Rule=rule["Name"],
             EventBusName=rule["EventBusName"],
             Limit=100
@@ -176,7 +176,7 @@ class aws_toolkits():
         return target_ids
 
     def get_broker_rule_status(self):
-        response = self.aws_ev_client.list_broker_rules(NamePrefix=f'{self.broker}-{self.branch}', Limit=100)
+        response = self.__aws_ev_client.list_rules(NamePrefix=f'{self.broker}-{self.branch}', Limit=100)
         event_bridge_rule_states = []
         rule_table = PrettyTable(['Rule_Name', 'State', 'Event_Bus', 'Managed_By', 'Target_Ids'])
 
@@ -199,7 +199,7 @@ class aws_toolkits():
 
     def disable_event_bridge_rules(self, rule_name, event_bus):
         try:
-            self.aws_ev_client.disable_rule(
+            self.__aws_ev_client.disable_rule(
                 Name=rule_name,
                 EventBusName=event_bus
             )
@@ -208,7 +208,7 @@ class aws_toolkits():
 
     def enable_event_bridge_rules(self, rule_name, event_bus):
         try:
-            self.aws_ev_client.enable_rule(
+            self.__aws_ev_client.enable_rule(
                 Name=rule_name,
                 EventBusName=event_bus
             )
@@ -239,7 +239,7 @@ class aws_toolkits():
 
 
     def list_broker_rules(self):
-        response = self.aws_ev_client.list_rules(NamePrefix=f'{self.broker}-{self.branch}', Limit=100)
+        response = self.__aws_ev_client.list_rules(NamePrefix=f'{self.broker}-{self.branch}', Limit=100)
         event_bridge_rule_states = []
         rule_table = PrettyTable(['Rule_Name', 'State', 'Event_Bus', 'Managed_By', 'Target_Ids'])
 
@@ -269,7 +269,7 @@ class aws_toolkits():
                 for rule in rules:
                     try:
                         # remove target first
-                        self.aws_ev_client.remove_targets(
+                        self.__aws_ev_client.remove_targets(
                             Rule=rule.rule_name,
                             EventBusName=rule.rule_event_bus_name,
                             Ids=rule.target_ids,
@@ -277,7 +277,7 @@ class aws_toolkits():
                         )
 
                         # delete rule after removing targets
-                        self.aws_ev_client.delete_rule(
+                        self.__aws_ev_client.delete_rule(
                             Name=rule.rule_name,
                             EventBusName=rule.rule_event_bus_name,
                             Force=True
