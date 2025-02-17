@@ -31,18 +31,20 @@ class StateMachineExecutionResult:
 
 
 class EventBridgeRuleState:
-    def __init__(self, rule_name, state, rule_event_bus_name):
+    def __init__(self, rule_name, state, rule_event_bus_name, managed_by, target_ids):
         """Constructor initialization"""
         self.rule_name = rule_name
         self.state = state
         self.rule_event_bus_name = rule_event_bus_name
+        self.managed_by = managed_by
+        self.target_ids = target_ids
 
     def __getattr__(self, attr):
         """Handles undefined attribute access."""
         return f"'{attr}' attribute not found"
 
     def __repr__(self):
-        return f'{self.rule_name}\t{self.state}\t{self.rule_event_bus_name}'
+        return f'{self.rule_name}\t{self.state}\t{self.rule_event_bus_name}\t{self.managed_by}\t{self.target_ids}'
 
 
 def round_to_half_hour(dt):
@@ -155,7 +157,7 @@ def get_broker_all_state_machines_last_run_formatted(aws_sf_client, broker, chec
 def get_broker_rule_status(aws_ev_client, broker, branch='production'):
     response = aws_ev_client.list_rules(NamePrefix=f'{broker}-{branch}', Limit=100)
     event_bridge_rule_states = []
-    rule_table = PrettyTable(['Rule_Name', 'State', 'Event_Bus'])
+    rule_table = PrettyTable(['Rule_Name', 'State', 'Event_Bus', 'Managed_By', 'Target_Ids'])
 
     if not response['Rules']:
         print(f'{broker}-{branch}* rule not found')
@@ -164,18 +166,20 @@ def get_broker_rule_status(aws_ev_client, broker, branch='production'):
             rule_name = rule["Name"]
             rule_state = rule["State"]
             rule_event_bus_name = rule["EventBusName"]
+            rule_managed_by = 'default'
+            target_ids = list_rule_target_ids(aws_ev_client, rule)
 
-            event_bridge_rule_state = EventBridgeRuleState(rule_name, rule_state, rule_event_bus_name)
-            rule_table.add_row([rule_name, rule_state, rule_event_bus_name])
+            event_bridge_rule_state = EventBridgeRuleState(rule_name, rule_state, rule_event_bus_name, rule_managed_by, target_ids)
+            rule_table.add_row([rule_name, rule_state, rule_event_bus_name, rule_managed_by, target_ids])
             event_bridge_rule_states.append(event_bridge_rule_state)
 
     print(rule_table.get_string(sortby='State', reversesort=True))
     return event_bridge_rule_states
 
 
-def disable_event_bridge_rules(aws_sf_client, rule_name, event_bus):
+def disable_event_bridge_rules(aws_ev_client, rule_name, event_bus):
     try:
-        aws_sf_client.disable_rule(
+        aws_ev_client.disable_rule(
             Name=rule_name,
             EventBusName=event_bus
         )
@@ -183,9 +187,9 @@ def disable_event_bridge_rules(aws_sf_client, rule_name, event_bus):
         print(e)
 
 
-def enable_event_bridge_rules(aws_sf_client, rule_name, event_bus):
+def enable_event_bridge_rules(aws_ev_client, rule_name, event_bus):
     try:
-        aws_sf_client.enable_rule(
+        aws_ev_client.enable_rule(
             Name=rule_name,
             EventBusName=event_bus
         )
@@ -193,28 +197,99 @@ def enable_event_bridge_rules(aws_sf_client, rule_name, event_bus):
         print(e)
 
 
-def disable_broker_rules(aws_sf_client, broker, branch='production'):
+def disable_broker_rules(aws_ev_client, broker, branch='production'):
     print(f'Rule Status Before Disable:')
-    event_bridge_rule_states = get_broker_rule_status(aws_sf_client, broker, branch)
+    event_bridge_rule_states = get_broker_rule_status(aws_ev_client, broker, branch)
 
     for event_bridge_rule_state in event_bridge_rule_states:
         if event_bridge_rule_state.state == 'ENABLED':
-            disable_event_bridge_rules(aws_sf_client, event_bridge_rule_state.rule_name, event_bridge_rule_state.rule_event_bus_name)
+            disable_event_bridge_rules(aws_ev_client, event_bridge_rule_state.rule_name, event_bridge_rule_state.rule_event_bus_name)
 
     print(f'Rule Status After Disable:')
-    get_broker_rule_status(aws_sf_client, broker, branch)
+    get_broker_rule_status(aws_ev_client, broker, branch)
 
 
-def enable_broker_rules(aws_sf_client, broker, branch='production'):
+def enable_broker_rules(aws_ev_client, broker, branch='production'):
     print(f'Rule Status Before Enable:')
-    event_bridge_rule_states = get_broker_rule_status(aws_sf_client, broker, branch)
+    event_bridge_rule_states = get_broker_rule_status(aws_ev_client, broker, branch)
 
     for event_bridge_rule_state in event_bridge_rule_states:
         if event_bridge_rule_state.rule_name == 'DISABLED':
-            enable_event_bridge_rules(aws_sf_client, event_bridge_rule_state.rule_name, event_bridge_rule_state.rule_event_bus_name)
+            enable_event_bridge_rules(aws_ev_client, event_bridge_rule_state.rule_name, event_bridge_rule_state.rule_event_bus_name)
 
     print(f'Rule Status After Enable:')
-    get_broker_rule_status(aws_sf_client, broker, branch)
+    get_broker_rule_status(aws_ev_client, broker, branch)
+
+
+
+def list_rules(aws_ev_client, broker, rule_name_prefix):
+    response = aws_ev_client.list_rules(NamePrefix=f'{broker}-{rule_name_prefix}', Limit=100)
+    event_bridge_rule_states = []
+    rule_table = PrettyTable(['Rule_Name', 'State', 'Event_Bus', 'Managed_By', 'Target_Ids'])
+
+    if not response['Rules']:
+        print(f'{rule_name_prefix}* rule not found')
+    else:
+        for rule in response["Rules"]:
+            rule_name = rule["Name"]
+            rule_state = rule["State"]
+            rule_event_bus_name = rule["EventBusName"]
+            rule_managed_by = 'default'
+            target_ids = list_rule_target_ids(aws_ev_client, rule)
+
+            event_bridge_rule_state = EventBridgeRuleState(rule_name, rule_state, rule_event_bus_name, rule_managed_by, target_ids)
+            rule_table.add_row([rule_name, rule_state, rule_event_bus_name, rule_managed_by, target_ids])
+            event_bridge_rule_states.append(event_bridge_rule_state)
+
+    print(rule_table.get_string(sortby='State', reversesort=True))
+    return event_bridge_rule_states
+
+
+def delete_broker_rules(aws_ev_client, rules):
+    if not rules:
+        print(f'No rule to delete')
+    else:
+        confirm_delete = input('CONFIRM TO DELETE?\n')
+        if confirm_delete.lower() == 'yes' or confirm_delete.lower() == 'y':
+            for rule in rules:
+                try:
+                    # remove target first
+                    aws_ev_client.remove_targets(
+                        Rule=rule.rule_name,
+                        EventBusName=rule.rule_event_bus_name,
+                        Ids=rule.target_ids,
+                        Force=True
+                    )
+
+                    # delete rule after removing targets
+                    aws_ev_client.delete_rule(
+                        Name=rule.rule_name,
+                        EventBusName=rule.rule_event_bus_name,
+                        Force=True
+                    )
+
+                    print(f'Deleted rule: {rule.rule_name}')
+                except Exception as e:
+                    print(e)
+        else:
+            print(f'Confirm to NOT delete.')
+
+def list_rule_target_ids(aws_ev_client, rule):
+    target_ids = []
+    response = aws_ev_client.list_targets_by_rule(
+        Rule=rule["Name"],
+        EventBusName=rule["EventBusName"],
+        Limit=100
+    )
+
+    if not response['Targets']:
+        print(f'{rule.rule_name}* rule not found')
+    else:
+        for target in response['Targets']:
+            target_id = target['Id']
+            target_ids.append(target_id)
+
+    return target_ids
 
 
 if __name__ == '__main__':
