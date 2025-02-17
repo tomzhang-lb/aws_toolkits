@@ -14,4 +14,7 @@ if __name__ == '__main__':
     # aws_client.get_broker_rule_status()
 
     # broker branch rules
-    aws_client.list_broker_rules()
+    # aws_client.list_broker_rules()
+
+    # broker
+    aws_client.disable_broker_rules()
