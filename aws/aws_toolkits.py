@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import boto3
 from prettytable import PrettyTable
 
@@ -46,12 +46,30 @@ class EventBridgeRuleState:
         return f'{self.rule_name}\t{self.state}\t{self.rule_event_bus_name}\t{self.managed_by}\t{self.target_ids}'
 
 
-class aws_toolkits():
+class LambdaFunction:
+    def __init__(self, function_name, function_arn, function_version, function_last_executed, function_last_modified):
+        self.function_name = function_name
+        self.function_arn = function_arn
+        self.function_version = function_version
+        self.function_last_executed = function_last_executed
+        self.function_last_modified = function_last_modified
+
+    def __getattr__(self, attr):
+        """Handles undefined attribute access."""
+        return f"'{attr}' attribute not found"
+
+    def __repr__(self):
+        return f'{self.function_name}\t{self.function_arn}\t{self.function_version}\t{self.function_last_executed}\t{self.function_last_modified}'
+
+
+class AwsToolkits:
     def __init__(self, broker, branch):
-        self.broker = broker
-        self.branch = branch
+        self.broker = broker.lower()
+        self.branch = branch.lower()
         self.__aws_sf_client = Boto3ClientSingleton('stepfunctions')
-        self.__aws_ev_client = Boto3ClientSingleton('events')
+        self.__aws_events_client = Boto3ClientSingleton('events')
+        self.__aws_lambda_client = Boto3ClientSingleton('lambda')
+        self.__aws_log_client = Boto3ClientSingleton('logs')
 
     def __round_to_half_hour(self, dt: datetime):
         """Rounds a datetime object to the nearest half-hour"""
@@ -109,7 +127,8 @@ class aws_toolkits():
             status = execution_result['status']
             state_machine_execution_result = StateMachineExecutionResult(state_machine_name, start_date, status)
         else:
-            state_machine_execution_result = StateMachineExecutionResult(state_machine_name, '1970-01-01 00:00:00', 'NOT_RUN')
+            state_machine_execution_result = StateMachineExecutionResult(state_machine_name, '1970-01-01 00:00:00',
+                                                                         'NOT_RUN')
 
         return state_machine_execution_result
 
@@ -142,9 +161,11 @@ class aws_toolkits():
                 # if the start machine finished but start time before check time more than 1 hour, then it is not a half an hour job
                 if (status == 'SUCCEEDED' and start_time > check_time) or (status == 'NOT_RUN'):
                     ready_to_release = 'YES'
-                elif status == 'SUCCEEDED' and start_time < check_time and (check_time - start_time).total_seconds() / 3600 < 0.5:
+                elif status == 'SUCCEEDED' and start_time < check_time and (
+                        check_time - start_time).total_seconds() / 3600 < 0.5:
                     ready_to_release = 'NOT_START'
-                elif status == 'SUCCEEDED' and start_time < check_time and (check_time - start_time).total_seconds() / 3600 > 1:
+                elif status == 'SUCCEEDED' and start_time < check_time and (
+                        check_time - start_time).total_seconds() / 3600 > 1:
                     ready_to_release = 'YES'
                 elif status == 'RUNNING':
                     ready_to_release = 'NO'
@@ -160,7 +181,7 @@ class aws_toolkits():
 
     def list_rule_target_ids(self, rule):
         target_ids = []
-        response = self.__aws_ev_client.list_targets_by_rule(
+        response = self.__aws_events_client.list_targets_by_rule(
             Rule=rule["Name"],
             EventBusName=rule["EventBusName"],
             Limit=100
@@ -176,7 +197,7 @@ class aws_toolkits():
         return target_ids
 
     def get_broker_rule_status(self):
-        response = self.__aws_ev_client.list_rules(NamePrefix=f'{self.broker}-{self.branch}', Limit=100)
+        response = self.__aws_events_client.list_rules(NamePrefix=f'{self.broker}-{self.branch}', Limit=100)
         event_bridge_rule_states = []
         rule_table = PrettyTable(['Rule_Name', 'State', 'Event_Bus', 'Managed_By', 'Target_Ids'])
 
@@ -190,7 +211,8 @@ class aws_toolkits():
                 rule_managed_by = 'default'
                 target_ids = self.list_rule_target_ids(rule)
 
-                event_bridge_rule_state = EventBridgeRuleState(rule_name, rule_state, rule_event_bus_name, rule_managed_by, target_ids)
+                event_bridge_rule_state = EventBridgeRuleState(rule_name, rule_state, rule_event_bus_name,
+                                                               rule_managed_by, target_ids)
                 rule_table.add_row([rule_name, rule_state, rule_event_bus_name, rule_managed_by, target_ids])
                 event_bridge_rule_states.append(event_bridge_rule_state)
 
@@ -199,7 +221,7 @@ class aws_toolkits():
 
     def disable_event_bridge_rules(self, rule_name, event_bus):
         try:
-            self.__aws_ev_client.disable_rule(
+            self.__aws_events_client.disable_rule(
                 Name=rule_name,
                 EventBusName=event_bus
             )
@@ -208,7 +230,7 @@ class aws_toolkits():
 
     def enable_event_bridge_rules(self, rule_name, event_bus):
         try:
-            self.__aws_ev_client.enable_rule(
+            self.__aws_events_client.enable_rule(
                 Name=rule_name,
                 EventBusName=event_bus
             )
@@ -221,7 +243,8 @@ class aws_toolkits():
 
         for event_bridge_rule_state in event_bridge_rule_states:
             if event_bridge_rule_state.state == 'ENABLED':
-                self.disable_event_bridge_rules(event_bridge_rule_state.rule_name, event_bridge_rule_state.rule_event_bus_name)
+                self.disable_event_bridge_rules(event_bridge_rule_state.rule_name,
+                                                event_bridge_rule_state.rule_event_bus_name)
 
         print(f'Rule Status After Disable:')
         self.get_broker_rule_status()
@@ -232,14 +255,14 @@ class aws_toolkits():
 
         for event_bridge_rule_state in event_bridge_rule_states:
             if event_bridge_rule_state.rule_name == 'DISABLED':
-                self.enable_event_bridge_rules(event_bridge_rule_state.rule_name, event_bridge_rule_state.rule_event_bus_name)
+                self.enable_event_bridge_rules(event_bridge_rule_state.rule_name,
+                                               event_bridge_rule_state.rule_event_bus_name)
 
         print(f'Rule Status After Enable:')
         self.get_broker_rule_status()
 
-
     def list_broker_rules(self):
-        response = self.__aws_ev_client.list_rules(NamePrefix=f'{self.broker}-{self.branch}', Limit=100)
+        response = self.__aws_events_client.list_rules(NamePrefix=f'{self.broker}-{self.branch}', Limit=100)
         event_bridge_rule_states = []
         rule_table = PrettyTable(['Rule_Name', 'State', 'Event_Bus', 'Managed_By', 'Target_Ids'])
 
@@ -253,45 +276,102 @@ class aws_toolkits():
                 rule_managed_by = 'default'
                 target_ids = self.list_rule_target_ids(rule)
 
-                event_bridge_rule_state = EventBridgeRuleState(rule_name, rule_state, rule_event_bus_name, rule_managed_by, target_ids)
+                event_bridge_rule_state = EventBridgeRuleState(rule_name, rule_state, rule_event_bus_name,
+                                                               rule_managed_by, target_ids)
                 rule_table.add_row([rule_name, rule_state, rule_event_bus_name, rule_managed_by, target_ids])
                 event_bridge_rule_states.append(event_bridge_rule_state)
 
         print(rule_table.get_string(sortby='State', reversesort=True))
         return event_bridge_rule_states
 
-    def delete_broker_rules(self, rules):
+    def __delete_rules(self, rules):
         if not rules:
             print(f'No rule to delete')
         else:
             confirm_delete = input('CONFIRM TO DELETE?\n')
             if confirm_delete.lower() == 'yes' or confirm_delete.lower() == 'y':
                 for rule in rules:
-                    try:
-                        # remove target first
-                        self.__aws_ev_client.remove_targets(
-                            Rule=rule.rule_name,
-                            EventBusName=rule.rule_event_bus_name,
-                            Ids=rule.target_ids,
-                            Force=True
-                        )
+                    if rule.state == 'ENABLED':
+                        print(f'Rule_Name: {rule.rule_name} is still {rule.state}, can NOT delete!')
+                    else:
+                        try:
+                            # remove target first
+                            self.__aws_events_client.remove_targets(
+                                Rule=rule.rule_name,
+                                EventBusName=rule.rule_event_bus_name,
+                                Ids=rule.target_ids,
+                                Force=True
+                            )
 
-                        # delete rule after removing targets
-                        self.__aws_ev_client.delete_rule(
-                            Name=rule.rule_name,
-                            EventBusName=rule.rule_event_bus_name,
-                            Force=True
-                        )
+                            # delete rule after removing targets
+                            self.__aws_events_client.delete_rule(
+                                Name=rule.rule_name,
+                                EventBusName=rule.rule_event_bus_name,
+                                Force=True
+                            )
 
-                        print(f'Deleted rule: {rule.rule_name}')
-                    except Exception as e:
-                        print(e)
+                            print(f'Deleted rule: {rule.rule_name}')
+                        except Exception as e:
+                            print(e)
             else:
                 print(f'Confirm to NOT delete.')
 
+    def delete_broker_rules(self):
+        event_bridge_rule_states = self.list_broker_rules()
+        self.__delete_rules(event_bridge_rule_states)
+
+    def list_broker_functions(self):
+        functions = []
+        function_table = PrettyTable(['Function_Name', 'Function_Arn', 'Version', 'Last_Executed', 'Last_Modified'])
+        paginator = self.__aws_lambda_client.get_paginator('list_functions')
+        for page in paginator.paginate():
+            for function in page['Functions']:
+                # print(function)
+                function_name = function['FunctionName']
+                function_arn = function['FunctionArn']
+                function_version = function['Version']
+                function_last_modified = function['LastModified']
+                function_last_executed = self.lambda_last_execution_time(function_name)
+
+                if function_name.lower().startswith(f'{self.broker}-{self.branch}'):
+                    lambda_function = LambdaFunction(function_name, function_arn, function_version,
+                                                     function_last_executed, function_last_modified)
+                    function_table.add_row(
+                        [function_name, function_arn, function_version, function_last_executed, function_last_modified])
+                    functions.append(lambda_function)
+                else:
+                    pass
+            # break
+
+        print(function_table.get_string(sortby='Last_Executed', reversesort=False))
+        return functions
+
+    def lambda_last_execution_time(self, function_name):
+        log_group_name = f'/aws/lambda/{function_name}'
+        last_execution_time = ''
+        try:
+            # Get the latest log streams (ordered by LastEventTime)
+            response = self.__aws_log_client.describe_log_streams(
+                logGroupName=log_group_name,
+                orderBy='LastEventTime',
+                descending=True,
+                limit=1  # Get the most recent log stream
+            )
+
+            if response['logStreams']:
+                last_event_timestamp = response['logStreams'][0]['firstEventTimestamp']
+                last_execution_time = datetime.fromtimestamp(last_event_timestamp / 1000)
+                # print(f'Last execution time: {last_execution_time}')
+            else:
+                print('No executions found for this Lambda.')
+
+        except self.__aws_log_client.exceptions.ResourceNotFoundException:
+            print(f'Log group {log_group_name} not found.')
+        finally:
+            return last_execution_time
+
 
 if __name__ == '__main__':
-
     # for broker_state_machine, broker_state_machine_arn in broker_state_machines.items():
     #     print(f'{broker_state_machine}: {broker_state_machine_arn}')
 
@@ -301,7 +381,7 @@ if __name__ == '__main__':
     broker = 'dlsm'
     branch = 'production'
     # get all state machine status
-    aws_toolkits = aws_toolkits(broker, branch)
+    aws_toolkits = AwsToolkits(broker, branch)
     # aws_sf_client = Boto3ClientSingleton('stepfunctions')
     aws_toolkits.get_broker_all_state_machines_last_run_formatted()
     # state_machines_status = get_broker_all_state_machines_last_run_formatted(aws_sf_client, broker)
