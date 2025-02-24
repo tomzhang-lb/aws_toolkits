@@ -6,7 +6,6 @@ if __name__ == '__main__':
     branch = sys.argv[2]
 
     aws_toolkits = AwsToolkits(broker, branch)
-
     # list broker step function latest execution status
     # aws_toolkits.get_broker_all_state_machines_last_run_formatted()
 
@@ -26,4 +25,7 @@ if __name__ == '__main__':
     # aws_toolkits.lambda_last_execution_time('tmgm-uat-master-crm-categories')
 
     # list functions
-    aws_toolkits.list_broker_functions()
+    # aws_toolkits.list_broker_functions()
+
+    # delete functions
+    # aws_toolkits.delete_broker_functions()

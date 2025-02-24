@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 import boto3
 from prettytable import PrettyTable
+from dateutil.relativedelta import relativedelta
 
 
 # aws boto3 client
@@ -47,19 +48,20 @@ class EventBridgeRuleState:
 
 
 class LambdaFunction:
-    def __init__(self, function_name, function_arn, function_version, function_last_executed, function_last_modified):
+    def __init__(self, function_name, function_arn, function_version, function_last_executed, function_last_modified, executed_within_three_months):
         self.function_name = function_name
         self.function_arn = function_arn
         self.function_version = function_version
         self.function_last_executed = function_last_executed
         self.function_last_modified = function_last_modified
+        self.executed_within_three_months = executed_within_three_months
 
     def __getattr__(self, attr):
         """Handles undefined attribute access."""
         return f"'{attr}' attribute not found"
 
     def __repr__(self):
-        return f'{self.function_name}\t{self.function_arn}\t{self.function_version}\t{self.function_last_executed}\t{self.function_last_modified}'
+        return f'{self.function_name}\t{self.function_arn}\t{self.function_version}\t{self.function_last_executed}\t{self.function_last_modified}\t{self.executed_within_three_months}'
 
 
 class AwsToolkits:
@@ -322,8 +324,11 @@ class AwsToolkits:
 
     def list_broker_functions(self):
         functions = []
-        function_table = PrettyTable(['Function_Name', 'Function_Arn', 'Version', 'Last_Executed', 'Last_Modified'])
+        function_table = PrettyTable(['Function_Name', 'Function_Arn', 'Version', 'Last_Executed', 'Last_Modified', 'Executed_Within_3_Months'])
         paginator = self.__aws_lambda_client.get_paginator('list_functions')
+        three_months_ago = datetime.now() - relativedelta(months=3)
+
+
         for page in paginator.paginate():
             for function in page['Functions']:
                 # print(function)
@@ -332,23 +337,24 @@ class AwsToolkits:
                 function_version = function['Version']
                 function_last_modified = function['LastModified']
                 function_last_executed = self.lambda_last_execution_time(function_name)
+                executed_within_three_months = 'Y' if function_last_executed > three_months_ago else 'N'
 
                 if function_name.lower().startswith(f'{self.broker}-{self.branch}'):
                     lambda_function = LambdaFunction(function_name, function_arn, function_version,
-                                                     function_last_executed, function_last_modified)
+                                                     function_last_executed, function_last_modified, executed_within_three_months)
                     function_table.add_row(
-                        [function_name, function_arn, function_version, function_last_executed, function_last_modified])
+                        [function_name, function_arn, function_version, function_last_executed, function_last_modified, executed_within_three_months])
                     functions.append(lambda_function)
                 else:
                     pass
-            # break
+            break
 
         print(function_table.get_string(sortby='Last_Executed', reversesort=False))
         return functions
 
     def lambda_last_execution_time(self, function_name):
         log_group_name = f'/aws/lambda/{function_name}'
-        last_execution_time = ''
+        last_execution_time = datetime.strptime('1970-01-01 00:00:00', '%Y-%m-%d %H:%M:%S')
         try:
             # Get the latest log streams (ordered by LastEventTime)
             response = self.__aws_log_client.describe_log_streams(
@@ -369,6 +375,25 @@ class AwsToolkits:
             print(f'Log group {log_group_name} not found.')
         finally:
             return last_execution_time
+
+    def __delete_functions(self, function):
+        try:
+            response = self.__aws_lambda_client.delete_function(
+                FunctionName=function.function_name
+                # Qualifier=function.function_version
+            )
+            # print(response['ResponseMetadata']['HTTPStatusCode'])
+        except self.__aws_lambda_client.exceptions.ResourceNotFoundException:
+            print(f'Function {function.function_name} not found.')
+
+    def delete_broker_functions(self):
+        functions = self.list_broker_functions()
+
+        for function in functions:
+            if function.executed_within_three_months == 'N':
+                # and function.function_name.lower() == 'anzo-dev-iad-2144-check-lnd-aqa':
+                self.__delete_functions(function)
+                print(f'Function: {function.function_name} get deleted.')
 
 
 if __name__ == '__main__':
