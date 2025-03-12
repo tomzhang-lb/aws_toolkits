@@ -1,4 +1,8 @@
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
+
+from botocore.docs import paginator
 from prettytable import PrettyTable
 from dateutil.relativedelta import relativedelta
 
@@ -284,10 +288,11 @@ class AwsToolkits:
                 function_arn = function['FunctionArn']
                 function_version = function['Version']
                 function_last_modified = function['LastModified']
-                function_last_executed = self.lambda_last_execution_time(function_name)
-                executed_within_three_months = 'Y' if function_last_executed > three_months_ago else 'N'
 
                 if function_name.lower().startswith(f'{self.broker}-{self.branch}'):
+                    function_last_executed = self.lambda_last_execution_time(function_name)
+                    executed_within_three_months = 'Y' if function_last_executed > three_months_ago else 'N'
+
                     lambda_function = LambdaFunction(function_name, function_arn, function_version,
                                                      function_last_executed, function_last_modified, executed_within_three_months)
                     function_table.add_row(
@@ -295,7 +300,6 @@ class AwsToolkits:
                     functions.append(lambda_function)
                 else:
                     pass
-            break
 
         print(function_table.get_string(sortby='Last_Executed', reversesort=False))
         return functions
@@ -387,6 +391,63 @@ class AwsToolkits:
         else:
             print(f'No state machines found to delete.')
 
+    # multi threads
+    # def list_lambda_functions(self, marker=None):
+    #     """Fetch a batch of Lambda functions using pagination."""
+    #     params = {}
+    #     params['MaxItems'] = 50
+    #     if marker:
+    #         params['Marker'] = marker
+    #
+    #     response = self.__aws_lambda_client.list_functions(**params)
+    #     functions = response.get('Functions')
+    #     next_marker = response.get('NextMarker')
+    #
+    #     return functions, next_marker
+    #
+    # def get_all_lambda_functions(self):
+    #     """Fetch all Lambda functions using parallel requests with ThreadPoolExecutor."""
+    #     all_functions = []
+    #     markers = set()
+    #     three_months_ago = self.__check_time - relativedelta(months=3)
+    #
+    #     with ThreadPoolExecutor(max_workers=5) as executor:
+    #         futures = []
+    #         # Start the first request
+    #         futures.append(executor.submit(self.list_lambda_functions))
+    #
+    #         while futures:
+    #             for future in as_completed(futures):
+    #                 try:
+    #                     functions, next_marker = future.result()
+    #                     for function in functions:
+    #                         function_name = function['FunctionName']
+    #                         function_arn = function['FunctionArn']
+    #                         function_version = function['Version']
+    #                         function_last_modified = function['LastModified']
+    #                         if function_name.lower().startswith(f'{self.broker}-{self.branch}'):
+    #                             print(function_name)
+    #                             # function_last_executed = self.lambda_last_execution_time(function_name)
+    #                             # executed_within_three_months = 'Y' if function_last_executed > three_months_ago else 'N'
+    #                             # lambda_function = LambdaFunction(function_name, function_arn, function_version,
+    #                             #                                  function_last_executed, function_last_modified,
+    #                             #                                  executed_within_three_months)
+    #                             # all_functions.append(lambda_function)
+    #                         else:
+    #                             pass
+    #
+    #                     # If there's more data, add a new task to the pool
+    #                     if next_marker:
+    #                         if next_marker not in markers:
+    #                             print(next_marker)
+    #                             markers.add(next_marker)
+    #                             futures.append(executor.submit(self.list_lambda_functions, next_marker))
+    #                 except Exception as e:
+    #                     print(f"Error: {e}")
+    #
+    #     return all_functions
+
+
 
 if __name__ == '__main__':
     # for broker_state_machine, broker_state_machine_arn in broker_state_machines.items():
@@ -395,13 +456,20 @@ if __name__ == '__main__':
     # stateMachineExecutionResult = get_state_machine_last_run('arn:aws:states:ap-southeast-2:859004686855:stateMachine:tmgm-production-2nd-parallel-state')
     # print(stateMachineExecutionResult)
 
-    broker = 'dlsm'
-    branch = 'production'
+    broker = 'anzo'
+    branch = 'dev-iad-2791'
     # get all state machine status
     aws_toolkits = AwsToolkits(broker, branch)
     # aws_sf_client = Boto3ClientSingleton('stepfunctions')
-    aws_toolkits.get_broker_state_machines_for_release()
-    # state_machines_status = get_broker_all_state_machines_last_run_formatted(aws_sf_client, broker)
-
-    # enable_broker_rules(aws_ev_client, broker, branch='dev-iad-2733')
-    # disable_broker_rules(aws_ev_client, broker, branch='dev-iad-2733')
+    start_time = time.time()
+    # state_machines = aws_toolkits.list_all_state_machines()
+    # state_machines = aws_toolkits.get_broker_state_machine_arn()
+    functions = aws_toolkits.list_broker_functions()
+    end_time = time.time()
+    print(f'time_elapsed: {end_time - start_time}')
+    print(len(functions))
+    # if functions:
+    #     for function in functions:
+    #         print(function)
+    # else:
+    #     print("No state machines found.")
