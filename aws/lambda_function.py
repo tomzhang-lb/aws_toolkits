@@ -1,5 +1,8 @@
+from datetime import datetime
+
+
 class LambdaFunction:
-    def __init__(self, function_name, function_arn, function_version, function_last_executed, function_last_modified, executed_within_three_months):
+    def __init__(self, function_name, function_arn, function_version='$LATEST', function_last_executed=datetime.strptime('1970-01-01 00:00:00', '%Y-%m-%d %H:%M:%S'), function_last_modified=datetime.strptime('1970-01-01 00:00:00', '%Y-%m-%d %H:%M:%S'), executed_within_three_months='Y'):
         self.function_name = function_name
         self.function_arn = function_arn
         self.function_version = function_version
