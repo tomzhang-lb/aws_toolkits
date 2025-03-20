@@ -1,8 +1,7 @@
-import os
 import sys
+import os
 admin_root = os.path.dirname(os.path.dirname(__file__))
 sys.path.append(admin_root)
-
 from aws.aws_toolkits import AwsToolkits
 
 if __name__ == '__main__':
