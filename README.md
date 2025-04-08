@@ -10,8 +10,8 @@ Try these out in this repo!
 from aws_toolkits import aws_toolkits
 broker = '{broker}' # such as tmgm
 branch = '{git_branch}' # such as production
-action = '{action}' such as get_broker_state_machines_for_release
 aws_client = aws_toolkits(broker, branch)
+aws_client.'{action}' # such as get_broker_state_machines_for_release
 ```
 
 ## available actions:
@@ -33,5 +33,5 @@ aws_client = aws_toolkits(broker, branch)
 # The 2nd method by running aws_handler in command line
 ## Sample, get the state machines latest execution status, which can be used for release to check if the production state machines all finish, the 3rd arg is the function name listed above
 ```python
-python aws_handler.py anzo production get_broker_state_machines_status_for_release
+python aws_handler.py get_broker_state_machines_status_for_release anzo production 
 ```
