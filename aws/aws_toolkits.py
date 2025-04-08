@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from functools import wraps
 
+from botocore.config import Config
 from dateutil import parser
 from prettytable import PrettyTable
 from dateutil.relativedelta import relativedelta
@@ -17,13 +18,21 @@ from aws.utils import round_to_half_hour
 
 
 class AwsToolkits:
+
+    config = Config(
+        retries={
+            'max_attempts': 10,
+            'mode': 'standard'
+        }
+    )
+
     def __init__(self, broker, branch):
         self.broker = broker.lower()
         self.branch = branch.lower()
-        self.__aws_sf_client = Boto3ClientSingleton('stepfunctions')
-        self.__aws_events_client = Boto3ClientSingleton('events')
-        self.__aws_lambda_client = Boto3ClientSingleton('lambda')
-        self.__aws_log_client = Boto3ClientSingleton('logs')
+        self.__aws_sf_client = Boto3ClientSingleton('stepfunctions', config=self.config)
+        self.__aws_events_client = Boto3ClientSingleton('events', config=self.config)
+        self.__aws_lambda_client = Boto3ClientSingleton('lambda', config=self.config)
+        self.__aws_log_client = Boto3ClientSingleton('logs', config=self.config)
         self.__check_time = round_to_half_hour(dt=datetime.now())
         self.__three_months_ago = self.__check_time - relativedelta(months=3)
 
@@ -100,14 +109,47 @@ class AwsToolkits:
                 state_machines_status.append(state_machine_execution_result)
 
                 # it will be safe to drop the state machine whose last run beyond 3 months
-                if (self.__check_time - state_machine.state_machine_creation_time).total_seconds() / 3600/24 >= 90:
-                    executed_beyond_three_months = 'Yes'
+                if (self.__check_time - state_machine.state_machine_creation_time).total_seconds() / 3600/24 <= 90 or (self.__check_time - state_machine_execution_result.last_start_time).total_seconds() / 3600/24 <= 90:
+                    active_within_three_months = 'Yes'
                 else:
-                    executed_beyond_three_months = 'No'
+                    active_within_three_months = 'No'
 
-                state_machine.executed_beyond_three_months = executed_beyond_three_months
+                state_machine.active_within_three_months = active_within_three_months
                 state_machine.state_machine_last_executed = state_machine_execution_result.last_start_time
                 state_machine.last_execution_status = state_machine_execution_result.status
+        else:
+            print(f'No such state machine found: {self.broker}-{self.branch}* hence no execution results')
+
+        return state_machines_status, state_machine_arns
+
+    def __get_broker_state_machines_last_run_parallel(self):
+        state_machines_status = []
+
+        state_machine_arns = self.get_broker_state_machine_arn()
+        if state_machine_arns:
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                futures = [executor.submit(self.get_state_machine_last_run, state_machine.state_machine_arn) for state_machine in state_machine_arns]
+
+                # update lambda_function last executed
+                for future in as_completed(futures):
+                    try:
+                        state_machine_execution_result = future.result()
+                        state_machines_status.append(state_machine_execution_result)
+                    except Exception as e:
+                        print(e)
+
+            # update state machine
+            for state_machine in state_machines_status:
+                state_machine_arn = state_machine.state_machine_arn
+                last_start_time = state_machine.last_start_time
+                last_execution_status = state_machine.last_execution_status
+                for state_machine_obj in state_machine_arns:
+                    if state_machine_arn == state_machine_obj.state_machine_arn:
+                        state_machine_obj.state_machine_last_executed = last_start_time
+                        state_machine_obj.last_execution_status = last_execution_status
+
+                        active_within_three_months = 'Yes' if (self.__check_time - state_machine.state_machine_creation_time).total_seconds() / 3600 / 24 <= 90 or (self.__check_time - state_machine_execution_result.last_start_time).total_seconds() / 3600 / 24 <= 90 else 'No'
+                        state_machine.active_within_three_months = active_within_three_months
         else:
             print(f'No such state machine found: {self.broker}-{self.branch}* hence no execution results')
 
@@ -116,7 +158,8 @@ class AwsToolkits:
     def get_broker_state_machines_status_for_release(self):
         output_table = PrettyTable(['State_Machine', 'Check_Time', 'Last_Start_Time', 'Status', 'Ready_To_Release'])
         output_table.align = 'l'
-        state_machines_status, state_machine_arns = self.__get_broker_state_machines_last_run()
+        # state_machines_status, state_machine_arns = self.__get_broker_state_machines_last_run()
+        state_machines_status, state_machine_arns = self.__get_broker_state_machines_last_run_parallel()
 
         if state_machines_status:
             for result in state_machines_status:
@@ -142,7 +185,7 @@ class AwsToolkits:
                     ready_to_release = 'MANUAL_CHECK'
 
                 output_table.add_row([state_machine, self.__check_time, last_start_time, status, ready_to_release])
-                print(output_table.get_string(sortby='Ready_To_Release'))
+            print(output_table.get_string(sortby='Ready_To_Release'))
         else:
             pass
         return output_table
@@ -350,7 +393,8 @@ class AwsToolkits:
                 FunctionName=function.function_name
                 # Qualifier=function.function_version
             )
-            # print(response['ResponseMetadata']['HTTPStatusCode'])
+            delete_status = response['ResponseMetadata']['HTTPStatusCode']
+            print(f'Function {function.function_name} get deleted.') if delete_status == 204 else print(f'Function {function.function_name} delete failed.')
         except self.__aws_lambda_client.exceptions.ResourceNotFoundException:
             print(f'Function {function.function_name} not found.')
 
@@ -372,7 +416,6 @@ class AwsToolkits:
                 for function in functions:
                     if function.executed_within_three_months == 'N':
                         self.__delete_lambda_functions(function)
-                        print(f'Function: {function.function_name} get deleted.')
             except Exception as e:
                 print(e)
         else:
@@ -383,13 +426,15 @@ class AwsToolkits:
         output_table = PrettyTable(['State_Machine', 'Creation_Time', 'Last_Start_Time', 'Safe_to_Delete'])
         output_table.align = 'l'
         state_machines_status, state_machine_arns = self.__get_broker_state_machines_last_run()
+        # state_machines_status, state_machine_arns = self.__get_broker_state_machines_last_run_parallel()
 
         if state_machine_arns:
             for state_machine in state_machine_arns:
                 # it will be safe to drop the state machine whose last run beyond 3 months
-                if state_machine.executed_beyond_three_months == 'Yes':
+                if state_machine.active_within_three_months == 'No':
+                    safe_to_delete = 'Yes'
                     state_machines_to_purge.append(state_machine)
-                    output_table.add_row([state_machine.state_machine_name, state_machine.state_machine_creation_time, state_machine.state_machine_last_executed, state_machine.executed_beyond_three_months,])
+                    output_table.add_row([state_machine.state_machine_name, state_machine.state_machine_creation_time, state_machine.state_machine_last_executed, safe_to_delete])
             print(output_table.get_string(sortby='Creation_Time', reversesort=True))
         else:
             pass

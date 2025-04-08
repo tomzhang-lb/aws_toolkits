@@ -5,12 +5,14 @@ sys.path.append(admin_root)
 from aws.aws_toolkits import AwsToolkits
 
 if __name__ == '__main__':
-    broker = sys.argv[1]
-    branch = sys.argv[2]
-    action = sys.argv[3]
+    action = sys.argv[1]
+    broker = sys.argv[2]
+    branch = sys.argv[3]
+
+    # action = 'delete_broker_state_machines'
     # broker = 'anzo'
     # branch = 'dev-iad-1821'
-    # action = 'delete_broker_state_machines'
+
 
     aws_toolkits = AwsToolkits(broker, branch)
     command = f'{action}'
