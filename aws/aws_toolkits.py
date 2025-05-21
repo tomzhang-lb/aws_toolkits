@@ -370,7 +370,7 @@ class AwsToolkits:
                 function_name = function['FunctionName']
                 function_arn = function['FunctionArn']
                 function_version = function['Version']
-                function_last_modified = function['LastModified']
+                function_last_modified = datetime.strptime(function['LastModified'], '%Y-%m-%dT%H:%M:%S.%f%z').replace(tzinfo=None, microsecond=0)
 
                 if function_name.lower().startswith(f'{self.broker}-{self.branch}'):
                     function_name_return, function_last_executed = self.get_lambda_function_last_execution(function_name)
