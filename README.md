@@ -4,6 +4,18 @@ code to interact with AWS programmatically
 # Example Usage
 Try these out in this repo!
 
+# Setup
+1. Create a virtual environment:
+```python
+python3 -m venv aws_toolkits_venv
+source aws_toolkits_venv/bin/activate
+```
+
+2. Install dependencies:
+```python
+pip install -r requirements.txt
+```
+
 # The 1st method by running aws_handler code directly
 ## Prepare the client
 ```python
@@ -31,7 +43,8 @@ aws_client.'{action}' # such as get_broker_state_machines_for_release
 <br>
 
 # The 2nd method by running aws_handler in command line
-## Sample, get the state machines latest execution status, which can be used for release to check if the production state machines all finish, the 3rd arg is the function name listed above
+### Sample: Get the state machines latest execution status
+(It can be used for release to check if the production state machines all finish, the 3rd arg is the function name listed above)
 ```python
 python aws_handler.py get_broker_state_machines_status_for_release anzo production 
 ```
